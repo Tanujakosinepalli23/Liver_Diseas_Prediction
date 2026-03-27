@@ -42,7 +42,7 @@ def load_default_data():
     return pd.DataFrame(data)
 
 # -------------------------
-# Clean Dataset
+# Clean Data
 # -------------------------
 def clean_data(df):
     df.columns = df.columns.str.strip()
@@ -120,7 +120,7 @@ if st.session_state.df is not None:
         st.success("Model trained successfully ✔️")
 
 # -------------------------
-# Prediction
+# Prediction Section
 # -------------------------
 st.header("🔍 Enter Patient Details")
 
@@ -137,15 +137,22 @@ else:
 
     for i, col in enumerate(features):
         with cols[i % 2]:
+
             if col == "sex":
                 val = st.selectbox("Sex", [0, 1],
                                    format_func=lambda x: "Male" if x == 1 else "Female")
+
+            elif col == "age":
+                val = st.number_input("Age", min_value=0, max_value=120, value=30, step=1)
+
             else:
-                val = st.number_input(col, value=float(df[col].median()))
+                val = st.number_input(col, min_value=0.0, max_value=1000.0,
+                                      value=float(df[col].median()), step=0.1)
+
             inputs[col] = val
 
     # -------------------------
-    # Dynamic Health Score
+    # Health Score (FIXED)
     # -------------------------
     def compute_health_score(inputs):
         healthy_ranges = {
@@ -160,7 +167,7 @@ else:
             "ag_ratio": (1.0, 2.5)
         }
 
-        scores = []
+        penalty = 0
 
         for key, val in inputs.items():
             if key == "sex":
@@ -169,20 +176,15 @@ else:
             low, high = healthy_ranges.get(key, (None, None))
 
             if low is None:
-                scores.append(1)
                 continue
 
-            if low <= val <= high:
-                scores.append(1)
-            else:
-                mid = (low + high) / 2
-                half_range = (high - low) / 2
-                distance = abs(val - mid)
+            if val < low:
+                penalty += (low - val) * 4
+            elif val > high:
+                penalty += (val - high) * 4
 
-                score = max(0, 1 - (distance / half_range))
-                scores.append(score)
-
-        return int((sum(scores) / len(scores)) * 100)
+        score = max(0, 100 - int(penalty))
+        return score
 
     health_score = compute_health_score(inputs)
 
@@ -230,12 +232,16 @@ else:
         })
 
 # -------------------------
-# Reports
+# Reports Section
 # -------------------------
 st.header("📄 Reports")
 
 if st.session_state.reports:
     rep_df = pd.DataFrame(st.session_state.reports)
+
+    # Fix serial number
+    rep_df.index = range(1, len(rep_df) + 1)
+
     st.dataframe(rep_df)
 
     csv = rep_df.to_csv(index=False).encode("utf-8")
