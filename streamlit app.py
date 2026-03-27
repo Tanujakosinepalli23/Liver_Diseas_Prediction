@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import time
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
@@ -41,7 +42,7 @@ def load_default_data():
     return pd.DataFrame(data)
 
 # -------------------------
-# Data Cleaning
+# Clean Dataset
 # -------------------------
 def clean_data(df):
     df.columns = df.columns.str.strip()
@@ -107,7 +108,7 @@ elif option == "Upload Your Dataset":
         st.success("✅ Uploaded dataset loaded")
 
 # -------------------------
-# Train Model Button
+# Train Model
 # -------------------------
 if st.session_state.df is not None:
     st.dataframe(st.session_state.df.head())
@@ -132,7 +133,6 @@ else:
 
     inputs = {}
     cols = st.columns(2)
-
     features = df.drop("category", axis=1).columns
 
     for i, col in enumerate(features):
@@ -144,20 +144,64 @@ else:
                 val = st.number_input(col, value=float(df[col].median()))
             inputs[col] = val
 
-    # Health Score
+    # -------------------------
+    # Dynamic Health Score
+    # -------------------------
     def compute_health_score(inputs):
-        score = 100
-        for k, v in inputs.items():
-            if k != "sex" and v <= 0:
-                score -= 5
-        return max(score, 0)
+        healthy_ranges = {
+            "age": (18, 80),
+            "total_bilirubin": (0.1, 1.2),
+            "direct_bilirubin": (0.0, 0.3),
+            "alkphos": (44, 147),
+            "sgpt": (7, 56),
+            "sgot": (5, 40),
+            "total_proteins": (6.0, 8.3),
+            "albumin": (3.5, 5.0),
+            "ag_ratio": (1.0, 2.5)
+        }
+
+        scores = []
+
+        for key, val in inputs.items():
+            if key == "sex":
+                continue
+
+            low, high = healthy_ranges.get(key, (None, None))
+
+            if low is None:
+                scores.append(1)
+                continue
+
+            if low <= val <= high:
+                scores.append(1)
+            else:
+                mid = (low + high) / 2
+                half_range = (high - low) / 2
+                distance = abs(val - mid)
+
+                score = max(0, 1 - (distance / half_range))
+                scores.append(score)
+
+        return int((sum(scores) / len(scores)) * 100)
 
     health_score = compute_health_score(inputs)
 
+    # -------------------------
+    # Animated Health Bar
+    # -------------------------
     st.subheader("💚 Health Score")
-    st.metric("Score", f"{health_score}/100")
-    st.progress(health_score / 100)
 
+    score_placeholder = st.empty()
+    bar = st.progress(0)
+
+    for i in range(health_score + 1):
+        time.sleep(0.01)
+        bar.progress(i / 100)
+        score_placeholder.metric("Score", f"{i}/100")
+
+    # -------------------------
+    # Prediction
+    # -------------------------
     if st.button("Predict & Save Report"):
         input_df = pd.DataFrame([inputs])
         input_scaled = scaler.transform(input_df)
