@@ -42,10 +42,10 @@ def load_default_data():
     return pd.DataFrame(data)
 
 # -------------------------
-# Clean Data
+# Clean Data (FIXED)
 # -------------------------
 def clean_data(df):
-    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.strip().str.lower()
 
     if "sex" in df.columns:
         df["sex"] = df["sex"].astype(str).str.lower().map({
@@ -54,10 +54,14 @@ def clean_data(df):
             "1": 1, "0": 0
         })
 
-    numeric_cols = df.columns.drop("category")
+    if "category" in df.columns:
+        numeric_cols = df.columns.drop("category")
+    else:
+        numeric_cols = df.columns
+
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
-    if df["category"].dtype == object:
+    if "category" in df.columns and df["category"].dtype == object:
         df["category"] = df["category"].str.lower().map({
             "no_disease": 0,
             "suspect_disease": 1,
@@ -70,9 +74,14 @@ def clean_data(df):
     return df
 
 # -------------------------
-# Train Model
+# Train Model (SAFE)
 # -------------------------
 def train_model(df):
+
+    if "category" not in df.columns:
+        st.error("❌ Dataset must contain 'category' column")
+        st.stop()
+
     X = df.drop("category", axis=1)
     y = df["category"]
 
@@ -120,7 +129,7 @@ if st.session_state.df is not None:
         st.success("Model trained successfully ✔️")
 
 # -------------------------
-# Prediction Section
+# Prediction
 # -------------------------
 st.header("🔍 Enter Patient Details")
 
@@ -183,13 +192,12 @@ else:
             elif val > high:
                 penalty += (val - high) * 4
 
-        score = max(0, 100 - int(penalty))
-        return score
+        return max(0, 100 - int(penalty))
 
     health_score = compute_health_score(inputs)
 
     # -------------------------
-    # Animated Health Bar
+    # Animated Bar
     # -------------------------
     st.subheader("💚 Health Score")
 
@@ -232,14 +240,13 @@ else:
         })
 
 # -------------------------
-# Reports Section
+# Reports
 # -------------------------
 st.header("📄 Reports")
 
 if st.session_state.reports:
     rep_df = pd.DataFrame(st.session_state.reports)
 
-    # Fix serial number
     rep_df.index = range(1, len(rep_df) + 1)
 
     st.dataframe(rep_df)
