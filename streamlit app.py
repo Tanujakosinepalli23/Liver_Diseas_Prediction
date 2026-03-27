@@ -42,7 +42,7 @@ def load_default_data():
     return pd.DataFrame(data)
 
 # -------------------------
-# Clean Data (FIXED)
+# Clean Data (SAFE)
 # -------------------------
 def clean_data(df):
     df.columns = df.columns.str.strip().str.lower()
@@ -54,21 +54,21 @@ def clean_data(df):
             "1": 1, "0": 0
         })
 
+    # Convert numeric safely
+    for col in df.columns:
+        if col != "category":
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Convert category if exists
     if "category" in df.columns:
-        numeric_cols = df.columns.drop("category")
-    else:
-        numeric_cols = df.columns
-
-    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
-
-    if "category" in df.columns and df["category"].dtype == object:
-        df["category"] = df["category"].str.lower().map({
-            "no_disease": 0,
-            "suspect_disease": 1,
-            "hepatitis": 2,
-            "fibrosis": 3,
-            "cirrhosis": 4
-        })
+        if df["category"].dtype == object:
+            df["category"] = df["category"].str.lower().map({
+                "no_disease": 0,
+                "suspect_disease": 1,
+                "hepatitis": 2,
+                "fibrosis": 3,
+                "cirrhosis": 4
+            })
 
     df = df.dropna()
     return df
@@ -79,7 +79,7 @@ def clean_data(df):
 def train_model(df):
 
     if "category" not in df.columns:
-        st.error("❌ Dataset must contain 'category' column")
+        st.error("❌ Dataset must contain 'category' column for training")
         st.stop()
 
     X = df.drop("category", axis=1)
@@ -93,7 +93,7 @@ def train_model(df):
     model = RandomForestClassifier(n_estimators=200, random_state=42)
     model.fit(X_train_scaled, y_train)
 
-    return model, scaler
+    return model, scaler, X.columns
 
 # -------------------------
 # Dataset Selection
@@ -123,13 +123,14 @@ if st.session_state.df is not None:
     st.dataframe(st.session_state.df.head())
 
     if st.button("🚀 Train Model"):
-        model, scaler = train_model(st.session_state.df)
+        model, scaler, feature_cols = train_model(st.session_state.df)
         st.session_state.model = model
         st.session_state.scaler = scaler
+        st.session_state.feature_cols = feature_cols
         st.success("Model trained successfully ✔️")
 
 # -------------------------
-# Prediction
+# Prediction Section
 # -------------------------
 st.header("🔍 Enter Patient Details")
 
@@ -139,12 +140,12 @@ else:
     df = st.session_state.df
     model = st.session_state.model
     scaler = st.session_state.scaler
+    feature_cols = st.session_state.feature_cols
 
     inputs = {}
     cols = st.columns(2)
-    features = df.drop("category", axis=1).columns
 
-    for i, col in enumerate(features):
+    for i, col in enumerate(feature_cols):
         with cols[i % 2]:
 
             if col == "sex":
@@ -156,12 +157,13 @@ else:
 
             else:
                 val = st.number_input(col, min_value=0.0, max_value=1000.0,
-                                      value=float(df[col].median()), step=0.1)
+                                      value=float(df[col].median()) if col in df.columns else 0.0,
+                                      step=0.1)
 
             inputs[col] = val
 
     # -------------------------
-    # Health Score (FIXED)
+    # Health Score
     # -------------------------
     def compute_health_score(inputs):
         healthy_ranges = {
@@ -183,7 +185,6 @@ else:
                 continue
 
             low, high = healthy_ranges.get(key, (None, None))
-
             if low is None:
                 continue
 
@@ -196,9 +197,7 @@ else:
 
     health_score = compute_health_score(inputs)
 
-    # -------------------------
     # Animated Bar
-    # -------------------------
     st.subheader("💚 Health Score")
 
     score_placeholder = st.empty()
@@ -214,6 +213,7 @@ else:
     # -------------------------
     if st.button("Predict & Save Report"):
         input_df = pd.DataFrame([inputs])
+        input_df = input_df[feature_cols]  # ensure correct order
         input_scaled = scaler.transform(input_df)
 
         pred = model.predict(input_scaled)[0]
@@ -246,9 +246,7 @@ st.header("📄 Reports")
 
 if st.session_state.reports:
     rep_df = pd.DataFrame(st.session_state.reports)
-
     rep_df.index = range(1, len(rep_df) + 1)
-
     st.dataframe(rep_df)
 
     csv = rep_df.to_csv(index=False).encode("utf-8")
