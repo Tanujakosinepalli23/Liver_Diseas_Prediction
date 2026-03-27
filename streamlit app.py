@@ -13,139 +13,112 @@ st.title("🩺 Liver Disease Detection Web App")
 # -------------------------
 # Session State
 # -------------------------
+if "df" not in st.session_state:
+    st.session_state.df = None
 if "model" not in st.session_state:
     st.session_state.model = None
 if "scaler" not in st.session_state:
     st.session_state.scaler = None
 if "reports" not in st.session_state:
     st.session_state.reports = []
-if "df" not in st.session_state:
-    st.session_state.df = None
 
 # -------------------------
-# Default Dataset
+# Load & Clean Data
 # -------------------------
-def load_default_data():
-    data = {
-        "age": np.random.randint(20, 70, 200),
-        "sex": np.random.choice([0, 1], 200),
-        "total_bilirubin": np.random.uniform(0.1, 2.0, 200),
-        "direct_bilirubin": np.random.uniform(0.0, 0.5, 200),
-        "alkphos": np.random.uniform(50, 150, 200),
-        "sgpt": np.random.uniform(10, 60, 200),
-        "sgot": np.random.uniform(10, 50, 200),
-        "total_proteins": np.random.uniform(5.5, 8.5, 200),
-        "albumin": np.random.uniform(3.0, 5.5, 200),
-        "ag_ratio": np.random.uniform(0.8, 2.5, 200),
-        "category": np.random.choice([0,1,2,3,4], 200)
-    }
-    return pd.DataFrame(data)
-
-# -------------------------
-# Clean Data (SAFE)
-# -------------------------
-def clean_data(df):
+@st.cache_data
+def load_data(file):
+    df = pd.read_csv(file)
     df.columns = df.columns.str.strip().str.lower()
 
     if "sex" in df.columns:
         df["sex"] = df["sex"].astype(str).str.lower().map({
             "m": 1, "male": 1,
-            "f": 0, "female": 0,
-            "1": 1, "0": 0
+            "f": 0, "female": 0
         })
 
-    # Convert numeric safely
-    for col in df.columns:
-        if col != "category":
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # Convert category if exists
     if "category" in df.columns:
-        if df["category"].dtype == object:
-            df["category"] = df["category"].str.lower().map({
-                "no_disease": 0,
-                "suspect_disease": 1,
-                "hepatitis": 2,
-                "fibrosis": 3,
-                "cirrhosis": 4
-            })
+        numeric_cols = df.columns.drop("category")
+    else:
+        numeric_cols = df.columns
+
+    df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+
+    if "category" in df.columns:
+        df["category"] = df["category"].astype(str).str.lower().map({
+            "no_disease": 0,
+            "suspect_disease": 1,
+            "hepatitis": 2,
+            "fibrosis": 3,
+            "cirrhosis": 4
+        })
 
     df = df.dropna()
     return df
 
 # -------------------------
-# Train Model (SAFE)
+# Upload Dataset
 # -------------------------
-def train_model(df):
+st.header("📤 Upload Dataset")
 
-    if "category" not in df.columns:
-        st.error("❌ Dataset must contain 'category' column for training")
-        st.stop()
+uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-    X = df.drop("category", axis=1)
-    y = df["category"]
-
-    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-
-    model = RandomForestClassifier(n_estimators=200, random_state=42)
-    model.fit(X_train_scaled, y_train)
-
-    return model, scaler, X.columns
-
-# -------------------------
-# Dataset Selection
-# -------------------------
-st.header("📊 Dataset Selection")
-
-option = st.radio("Choose Dataset", ["Use Default Dataset", "Upload Your Dataset"])
-
-if option == "Use Default Dataset":
-    df = load_default_data()
+if uploaded_file:
+    df = load_data(uploaded_file)
     st.session_state.df = df
-    st.success("✅ Default dataset loaded")
+    st.success("Dataset loaded successfully ✔️")
+    st.dataframe(df.head())
 
-elif option == "Upload Your Dataset":
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    if "category" in df.columns:
+        X = df.drop("category", axis=1)
+        y = df["category"]
 
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        df = clean_data(df)
-        st.session_state.df = df
-        st.success("✅ Uploaded dataset loaded")
+        X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# -------------------------
-# Train Model
-# -------------------------
-if st.session_state.df is not None:
-    st.dataframe(st.session_state.df.head())
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
 
-    if st.button("🚀 Train Model"):
-        model, scaler, feature_cols = train_model(st.session_state.df)
+        model = RandomForestClassifier(n_estimators=200, random_state=42)
+        model.fit(X_train_scaled, y_train)
+
         st.session_state.model = model
         st.session_state.scaler = scaler
-        st.session_state.feature_cols = feature_cols
-        st.success("Model trained successfully ✔️")
+        st.success("Model trained ✔️")
+    else:
+        st.warning("⚠️ No 'category' column → Prediction disabled")
 
 # -------------------------
 # Prediction Section
 # -------------------------
-st.header("🔍 Enter Patient Details")
+st.header("🔍 Prediction & Health Score")
 
-if st.session_state.model is None:
-    st.warning("⚠️ Train model first")
+if st.session_state.df is None:
+    st.warning("Upload dataset first")
+elif st.session_state.model is None:
+    st.warning("Dataset must contain 'category' column for training")
 else:
     df = st.session_state.df
     model = st.session_state.model
     scaler = st.session_state.scaler
-    feature_cols = st.session_state.feature_cols
+
+    # Features safe handling
+    features = df.drop("category", axis=1).columns
+
+    healthy_ranges = {
+        "age": (18, 80),
+        "total_bilirubin": (0.1, 1.2),
+        "direct_bilirubin": (0.0, 0.3),
+        "alkphos": (44, 147),
+        "sgpt": (7, 56),
+        "sgot": (5, 40),
+        "total_proteins": (6.0, 8.3),
+        "albumin": (3.5, 5.0),
+        "ag_ratio": (1.0, 2.5)
+    }
 
     inputs = {}
     cols = st.columns(2)
 
-    for i, col in enumerate(feature_cols):
+    for i, col in enumerate(features):
         with cols[i % 2]:
 
             if col == "sex":
@@ -153,55 +126,60 @@ else:
                                    format_func=lambda x: "Male" if x == 1 else "Female")
 
             elif col == "age":
-                val = st.number_input("Age", min_value=0, max_value=120, value=30, step=1)
+                val = st.number_input("Age", min_value=0, max_value=120, value=30)
 
             else:
-                val = st.number_input(col, min_value=0.0, max_value=1000.0,
-                                      value=float(df[col].median()) if col in df.columns else 0.0,
-                                      step=0.1)
+                default_val = float(df[col].median())
+                val = st.number_input(
+                    col,
+                    value=default_val + (0.05 * default_val),
+                    format="%.2f"
+                )
 
             inputs[col] = val
 
-    # -------------------------
-    # Health Score
-    # -------------------------
-    def compute_health_score(inputs):
-        healthy_ranges = {
-            "age": (18, 80),
-            "total_bilirubin": (0.1, 1.2),
-            "direct_bilirubin": (0.0, 0.3),
-            "alkphos": (44, 147),
-            "sgpt": (7, 56),
-            "sgot": (5, 40),
-            "total_proteins": (6.0, 8.3),
-            "albumin": (3.5, 5.0),
-            "ag_ratio": (1.0, 2.5)
-        }
+            # Show range
+            if col in healthy_ranges:
+                low, high = healthy_ranges[col]
+                st.caption(f"Normal: {low} – {high}")
 
-        penalty = 0
+    # -------------------------
+    # IMPROVED HEALTH SCORE
+    # -------------------------
+    def compute_health_score(inputs, healthy_ranges):
+        total_score = 0
+        count = 0
 
-        for key, val in inputs.items():
-            if key == "sex":
+        for col, val in inputs.items():
+            if col == "sex":
                 continue
 
-            low, high = healthy_ranges.get(key, (None, None))
+            low, high = healthy_ranges.get(col, (None, None))
             if low is None:
                 continue
 
-            if val < low:
-                penalty += (low - val) * 4
-            elif val > high:
-                penalty += (val - high) * 4
+            mid = (low + high) / 2
+            range_width = (high - low)
 
-        return max(0, 100 - int(penalty))
+            deviation = abs(val - mid)
 
-    health_score = compute_health_score(inputs)
+            score = max(0, 1 - (deviation / range_width))
+
+            total_score += score
+            count += 1
+
+        if count == 0:
+            return 0
+
+        return int((total_score / count) * 100)
+
+    health_score = compute_health_score(inputs, healthy_ranges)
 
     # Animated Bar
     st.subheader("💚 Health Score")
 
-    score_placeholder = st.empty()
     bar = st.progress(0)
+    score_placeholder = st.empty()
 
     for i in range(health_score + 1):
         time.sleep(0.01)
@@ -213,7 +191,6 @@ else:
     # -------------------------
     if st.button("Predict & Save Report"):
         input_df = pd.DataFrame([inputs])
-        input_df = input_df[feature_cols]  # ensure correct order
         input_scaled = scaler.transform(input_df)
 
         pred = model.predict(input_scaled)[0]
@@ -245,11 +222,12 @@ else:
 st.header("📄 Reports")
 
 if st.session_state.reports:
-    rep_df = pd.DataFrame(st.session_state.reports)
-    rep_df.index = range(1, len(rep_df) + 1)
-    st.dataframe(rep_df)
+    df_reports = pd.DataFrame(st.session_state.reports)
+    df_reports.index = range(1, len(df_reports) + 1)
 
-    csv = rep_df.to_csv(index=False).encode("utf-8")
+    st.dataframe(df_reports)
+
+    csv = df_reports.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download Reports", csv, "reports.csv")
 else:
     st.info("No reports yet")
